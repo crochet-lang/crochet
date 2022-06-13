@@ -1,0 +1,72 @@
+---
+source: src/parser/mod.rs
+expression: "parse(r#\"\n        // x is 5\n        let x = 5\n        // y is 10\n        let y = 10\n        \"#)"
+---
+Program {
+    body: [
+        VarDecl {
+            span: 9..36,
+            comments: Some(
+                [
+                    Comment {
+                        span: 9..27,
+                        text: " x is 5",
+                    },
+                ],
+            ),
+            pattern: Ident(
+                BindingIdent {
+                    span: 31..32,
+                    id: Ident {
+                        span: 31..32,
+                        name: "x",
+                    },
+                    type_ann: None,
+                },
+            ),
+            init: Some(
+                Lit(
+                    Num(
+                        Num {
+                            span: 35..36,
+                            value: "5",
+                        },
+                    ),
+                ),
+            ),
+            declare: false,
+        },
+        VarDecl {
+            span: 45..74,
+            comments: Some(
+                [
+                    Comment {
+                        span: 45..64,
+                        text: " y is 10",
+                    },
+                ],
+            ),
+            pattern: Ident(
+                BindingIdent {
+                    span: 68..69,
+                    id: Ident {
+                        span: 68..69,
+                        name: "y",
+                    },
+                    type_ann: None,
+                },
+            ),
+            init: Some(
+                Lit(
+                    Num(
+                        Num {
+                            span: 72..74,
+                            value: "10",
+                        },
+                    ),
+                ),
+            ),
+            declare: false,
+        },
+    ],
+}

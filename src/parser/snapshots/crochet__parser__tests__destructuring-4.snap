@@ -6,6 +6,7 @@ Program {
     body: [
         VarDecl {
             span: 0..29,
+            comments: None,
             pattern: Array(
                 ArrayPat {
                     span: 4..20,

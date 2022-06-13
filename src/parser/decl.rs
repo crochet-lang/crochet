@@ -1,31 +1,41 @@
 use chumsky::prelude::*;
-use chumsky::primitive::*;
-use chumsky::text::Padded;
 
 use super::expr::expr_parser;
 use super::pattern::pattern_parser;
-use super::types::type_parser;
 use super::type_params::type_params;
+use super::types::type_parser;
+use super::util::just_with_padding;
 
 use crate::ast::*;
 
-pub fn just_with_padding(inputs: &str) -> Padded<Just<char, &str, Simple<char>>> {
-    just(inputs).padded()
-}
-
 pub fn decl_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
+    let comment = just("//")
+        .ignore_then(take_until(just('\n')))
+        .padded()
+        .map_with_span(|(chars, _), span| {
+            Comment {
+                span,
+                text: chars.into_iter().collect(),
+            }
+        });
+
     // We use `just` instead of `just_with_padding` here to ensure that
     // the span doesn't include leading whitespace.
     let pattern = pattern_parser();
-    let var_decl_with_init = just("declare")
-        .or_not()
+    let var_decl_with_init = comment.repeated()
+        .then(just("declare").or_not())
         .then_ignore(just_with_padding("let"))
         .then(just_with_padding("rec").or_not())
         .then(pattern.clone())
         .then_ignore(just_with_padding("="))
         .then(expr_parser())
         .map_with_span(
-            |(((declare, rec), pattern), init), span: Span| -> Statement {
+            |((((comments, declare), rec), pattern), init), span: Span| -> Statement {
+                let comments = match comments.len() {
+                    0 => None,
+                    _ => Some(comments)
+                };
+
                 match rec {
                     Some(_) => {
                         // `let fib = fix((fib) => (n) => ...)`
@@ -44,6 +54,7 @@ pub fn decl_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
 
                         Statement::VarDecl {
                             span,
+                            comments,
                             pattern,
                             init: Some(fix),
                             declare: declare.is_some(),
@@ -51,6 +62,7 @@ pub fn decl_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
                     }
                     None => Statement::VarDecl {
                         span,
+                        comments,
                         pattern,
                         init: Some(init),
                         declare: declare.is_some(),
@@ -59,13 +71,19 @@ pub fn decl_parser() -> impl Parser<char, Statement, Error = Simple<char>> {
             },
         );
 
-    let var_decl = just("declare")
-        .or_not()
+    let var_decl = comment.repeated()
+        .then(just("declare").or_not())
         .then_ignore(just_with_padding("let"))
         .then(pattern_parser())
-        .map_with_span(|(declare, pattern), span: Span| -> Statement {
+        .map_with_span(|((comments, declare), pattern), span: Span| -> Statement {
+            let comments = match comments.len() {
+                0 => None,
+                _ => Some(comments)
+            };
+            
             Statement::VarDecl {
                 span,
+                comments,
                 pattern,
                 init: None,
                 declare: declare.is_some(),

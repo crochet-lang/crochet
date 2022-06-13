@@ -1,23 +1,17 @@
-pub mod expr;
 pub mod decl;
+pub mod expr;
 pub mod jsx;
 pub mod pattern;
-pub mod types;
 pub mod type_params;
+pub mod types;
 pub mod util;
 
-use expr::expr_parser;
 use decl::decl_parser;
+use expr::expr_parser;
 
 use chumsky::prelude::*;
-use chumsky::primitive::*;
-use chumsky::text::Padded;
 
 use crate::ast::*;
-
-pub fn just_with_padding(inputs: &str) -> Padded<Just<char, &str, Simple<char>>> {
-    just(inputs).padded()
-}
 
 pub fn parser() -> impl Parser<char, Program, Error = Simple<char>> {
     let program = choice((
@@ -119,7 +113,9 @@ mod tests {
         insta::assert_debug_snapshot!(parse("<Foo msg=\"hello\" bar={baz}></Foo>"));
         insta::assert_debug_snapshot!(parse("<Foo><Bar>{baz}</Bar></Foo>"));
         insta::assert_debug_snapshot!(parse("<Foo>hello<Bar/>{world}<Baz/></Foo>"));
-        insta::assert_debug_snapshot!(parse("let elem = <div point={point} id=\"point\">Hello, {msg}</div>"));
+        insta::assert_debug_snapshot!(parse(
+            "let elem = <div point={point} id=\"point\">Hello, {msg}</div>"
+        ));
     }
 
     #[test]
@@ -199,5 +195,31 @@ mod tests {
     fn types() {
         insta::assert_debug_snapshot!(parse("let get_bar = <T>(foo: Foo<T>) => foo.bar"));
         insta::assert_debug_snapshot!(parse("declare let get_bar: (Foo) => T"));
+    }
+
+    #[test]
+    fn comments() {
+        insta::assert_debug_snapshot!(parse(
+            r#"
+        // x is 5
+        let x = 5
+        // y is 10
+        let y = 10
+        "#
+        ));
+        insta::assert_debug_snapshot!(parse(
+            r#"
+        // x is 5
+        // y is 10
+        let p = {x: 5, y: 10}
+        "#
+        ));
+        // TODO: add support for trailing comments
+        // insta::assert_debug_snapshot!(parse(
+        //     r#"
+        // let x = 5  // x is 5
+        // let y = 10  // y is 10
+        // "#
+        // ));
     }
 }

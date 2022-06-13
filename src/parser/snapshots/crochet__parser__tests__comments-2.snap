@@ -1,43 +1,46 @@
 ---
 source: src/parser/mod.rs
-expression: "parse(\"let p: Point = {x: 5, y: 10}\")"
+expression: "parse(r#\"\n        // x is 5\n        // y is 10\n        let p = {x: 5, y: 10}\n        \"#)"
 ---
 Program {
     body: [
         VarDecl {
-            span: 0..28,
-            comments: None,
+            span: 9..76,
+            comments: Some(
+                [
+                    Comment {
+                        span: 9..27,
+                        text: " x is 5",
+                    },
+                    Comment {
+                        span: 27..46,
+                        text: " y is 10",
+                    },
+                ],
+            ),
             pattern: Ident(
                 BindingIdent {
-                    span: 4..12,
+                    span: 50..51,
                     id: Ident {
-                        span: 4..5,
+                        span: 50..51,
                         name: "p",
                     },
-                    type_ann: Some(
-                        TypeRef(
-                            TypeRef {
-                                span: 7..12,
-                                name: "Point",
-                                type_params: None,
-                            },
-                        ),
-                    ),
+                    type_ann: None,
                 },
             ),
             init: Some(
                 Obj(
                     Obj {
-                        span: 15..28,
+                        span: 54..76,
                         props: [
                             KeyValue(
                                 KeyValueProp {
-                                    span: 16..20,
+                                    span: 55..59,
                                     name: "x",
                                     value: Lit(
                                         Num(
                                             Num {
-                                                span: 19..20,
+                                                span: 58..59,
                                                 value: "5",
                                             },
                                         ),
@@ -46,12 +49,12 @@ Program {
                             ),
                             KeyValue(
                                 KeyValueProp {
-                                    span: 22..27,
+                                    span: 61..66,
                                     name: "y",
                                     value: Lit(
                                         Num(
                                             Num {
-                                                span: 25..27,
+                                                span: 64..66,
                                                 value: "10",
                                             },
                                         ),

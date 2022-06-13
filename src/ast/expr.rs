@@ -11,9 +11,16 @@ pub struct Program {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    pub span: Span,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     VarDecl {
         span: Span,
+        comments: Option<Vec<Comment>>,
         pattern: Pattern,
         init: Option<Expr>,
         declare: bool,
