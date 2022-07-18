@@ -7,7 +7,7 @@ use crate::substitutable::Substitutable;
 use super::context::{Context, Env};
 use super::infer_type_ann::*;
 use super::substitutable::Subst;
-use super::types::{self, freeze_scheme, Scheme, Type, Variant};
+use super::types::{self, freeze_scheme, Scheme, Type, Variant, Flag};
 use super::util::{generalize, normalize, simplify_intersection};
 
 pub fn infer_prog(prog: &Program) -> Result<Context, String> {
@@ -68,7 +68,7 @@ pub fn infer_prog(prog: &Program) -> Result<Context, String> {
                         let init = init.as_ref().unwrap();
 
                         let (pa, s) =
-                            infer_pattern_and_init(pattern, init, &ctx, &PatternUsage::Assign)?;
+                            infer_pattern_and_init(pattern, init, &mut ctx, &PatternUsage::Assign)?;
 
                         // Inserts the new variables from infer_pattern() into the
                         // current context.
@@ -91,7 +91,7 @@ pub fn infer_prog(prog: &Program) -> Result<Context, String> {
             Statement::Expr { expr, .. } => {
                 // We ignore the type that was inferred, we only care that
                 // it succeeds since we aren't assigning it to variable.
-                infer_expr(&ctx, expr)?;
+                infer_expr(&mut ctx, expr)?;
             }
         };
     }
@@ -99,7 +99,7 @@ pub fn infer_prog(prog: &Program) -> Result<Context, String> {
     Ok(ctx)
 }
 
-pub fn infer_expr(ctx: &Context, expr: &Expr) -> Result<Scheme, String> {
+pub fn infer_expr(ctx: &mut Context, expr: &Expr) -> Result<Scheme, String> {
     let (s, t) = infer(ctx, expr)?;
     Ok(close_over(&s, &t, ctx))
 }
@@ -120,7 +120,7 @@ enum PatternUsage {
 fn infer_pattern_and_init(
     pat: &Pattern,
     init: &Expr,
-    ctx: &Context,
+    ctx: &mut Context,
     pu: &PatternUsage,
 ) -> Result<(Assump, Subst), String> {
     let type_param_map = HashMap::new();
@@ -153,7 +153,7 @@ fn infer_let(
     pu: &PatternUsage,
 ) -> Result<(Subst, Type), String> {
     let mut new_ctx = ctx.clone();
-    let (pa, s1) = infer_pattern_and_init(pat, init, &new_ctx, pu)?;
+    let (pa, s1) = infer_pattern_and_init(pat, init, &mut new_ctx, pu)?;
 
     // Inserts the new variables from infer_pattern() into the
     // current context.
@@ -161,7 +161,7 @@ fn infer_let(
         new_ctx.values.insert(name.to_owned(), scheme.to_owned());
     }
 
-    let (s2, t2) = infer(&new_ctx, body)?;
+    let (s2, t2) = infer(&mut new_ctx, body)?;
 
     // Copies over the count from new_ctx so that it's unique across Contexts.
     ctx.state.count.set(new_ctx.state.count.get());
@@ -175,7 +175,7 @@ fn is_promise(ty: &Type) -> bool {
     matches!(&ty.variant, Variant::Alias(types::AliasType { name, .. }) if name == "Promise")
 }
 
-fn infer(ctx: &Context, expr: &Expr) -> Result<(Subst, Type), String> {
+fn infer(ctx: &mut Context, expr: &Expr) -> Result<(Subst, Type), String> {
     match expr {
         Expr::App(App { lam, args, .. }) => {
             let (s1, lam_type) = infer(ctx, lam)?;
@@ -199,12 +199,13 @@ fn infer(ctx: &Context, expr: &Expr) -> Result<(Subst, Type), String> {
             let s3 = unify(&call_type, &lam_type, ctx)?;
 
             // ss = [s3, ...args_ss, s1]
-            let mut ss = vec![s3.clone()];
+            let mut ss = vec![s3];
             ss.append(&mut args_ss);
             ss.push(s1);
 
-            // return (s3 `compose` s2 `compose` s1, apply s3 tv)
-            Ok((compose_many_subs(&ss), ret_type.apply(&s3)))
+            let s = compose_many_subs(&ss);
+
+            Ok((s.clone(), ret_type.apply(&s)))
         }
         Expr::Fix(Fix { expr, .. }) => {
             let (s1, t) = infer(ctx, expr)?;
@@ -382,7 +383,7 @@ fn infer(ctx: &Context, expr: &Expr) -> Result<(Subst, Type), String> {
 
             let (ss, ts): (Vec<_>, Vec<_>) = params?.iter().cloned().unzip();
 
-            let (rs, rt) = infer(&new_ctx, body)?;
+            let (rs, rt) = infer(&mut new_ctx, body)?;
 
             // Copies over the count from new_ctx so that it's unique across Contexts.
             ctx.state.count.set(new_ctx.state.count.get());
@@ -523,6 +524,12 @@ fn infer(ctx: &Context, expr: &Expr) -> Result<(Subst, Type), String> {
             let s = compose_subs(&prop_s, &obj_s);
             let t = unwrap_member_type(&prop_t, ctx);
 
+            // TODO: implement Substitutable for Env and use that
+            if let Expr::Ident(ident) = obj.as_ref() {
+                let obj = obj_t.apply(&s);
+                ctx.values.insert(ident.name.to_owned(), Scheme::from(obj));
+            }
+
             Ok((s, t))
         }
         Expr::Empty(_) => {
@@ -551,12 +558,58 @@ fn infer_property_type(
             let mem_t = ctx.mem(obj_t.clone(), &prop.name());
             match props.iter().find(|p| p.name == prop.name()) {
                 Some(_) => Ok((Subst::default(), mem_t)),
-                None => Err(String::from("Record literal doesn't contain property")),
+                None => {
+                    if obj_t.flag == Some(Flag::MemberAccess) {
+                        // TODO:
+                        // - create a new object type from the existing one and add the missing property
+                        // - create a Subst manually that maps 
+                        let mut props = props.to_owned();
+                        let tv = ctx.fresh_var();
+                        props.push(types::TProp {
+                            name: prop.name(),
+                            // We assume the property is not optional when inferring an
+                            // object from a member access.
+                            optional: false,
+                            ty: tv.clone(),
+                        });
+                        let obj = ctx.object_with_flag(props, Flag::MemberAccess);
+
+                        let s = Subst::from([(obj_t.id, obj)]);
+                        let t = tv;
+
+                        Ok((s, t))
+                    } else {
+                        Err(String::from("Record literal doesn't contain property"))
+                    }                    
+                },
             }
         }
         Variant::Alias(types::AliasType { name, .. }) => {
             let t = lookup_alias(ctx, name)?;
             infer_property_type(&t, prop, ctx)
+        }
+        Variant::Var => {
+            let tv = ctx.fresh_var();
+            let obj = ctx.object_with_flag(
+                vec![types::TProp {
+                    name: prop.name(),
+                    // We assume the property is not optional when inferring an
+                    // object from a member access.
+                    optional: false,
+                    ty: tv.clone(),
+                }],
+                Flag::MemberAccess,
+            );
+            let mem1 = ctx.mem(obj_t.clone(), &prop.name());
+            let mem2 = ctx.mem(obj.clone(), &prop.name());
+
+            let s1 = unify(&mem1, &mem2, ctx)?;
+            let s2 = unify(obj_t, &obj, ctx)?;
+
+            let s = compose_subs(&s2, &s1);
+            let t = tv;
+
+            Ok((s, t))
         }
         _ => todo!("Unhandled {obj_t} in infer_property_type"),
     }
@@ -942,6 +995,14 @@ fn unify(t1: &Type, t2: &Type, ctx: &Context) -> Result<Subst, String> {
             let ss = result?;
             Ok(compose_many_subs(&ss))
         }
+        (Variant::Member(mem1), Variant::Member(mem2)) => {
+            // NOTE: In order to infer object types from their usage we need to
+            // be able to apply substitutions generated from inferring on Expr::Member
+            // when inferring another Expr::Member that may occur quite far away from
+            // the first one.
+            assert_eq!(mem1.prop, mem2.prop);
+            unify(&mem1.obj, &mem2.obj, ctx)
+        }
         (Variant::Tuple(types1), Variant::Tuple(types2)) => {
             // It's okay if t1 has extra properties, but it has to have all of t2's properties.
             if types1.len() < types2.len() {
@@ -1096,7 +1157,7 @@ fn unify(t1: &Type, t2: &Type, ctx: &Context) -> Result<Subst, String> {
         }
     };
     if result.is_err() {
-        println!("Can't unify t1 = {t1} with t2 = {t2}");
+        println!("Can't unify t1 = {t1:#?} with t2 = {t2:#?}");
     }
     result
 }

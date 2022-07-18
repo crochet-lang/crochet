@@ -23,9 +23,9 @@ mod tests {
     use super::*;
 
     fn infer(input: &str) -> String {
-        let ctx = Context::default();
+        let mut ctx = Context::default();
         let expr = expr_parser().parse(input).unwrap();
-        let scheme = infer::infer_expr(&ctx, &expr).unwrap();
+        let scheme = infer::infer_expr(&mut ctx, &expr).unwrap();
         println!("scheme = {:#?}", scheme);
         format!("{scheme}")
     }
@@ -1132,6 +1132,37 @@ mod tests {
         "#;
 
         infer_prog(src);
+    }
+
+    #[test]
+    fn infer_obj_type_from_use() {
+        let src = r#"
+        let mag = (p) => p.x * p.x + p.y * p.y
+        "#;
+        let ctx = infer_prog(src);
+
+        assert_eq!(get_type("mag", &ctx), "({x: number, y: number}) => number");
+    }
+
+    #[test]
+    fn infer_obj_type_from_use_with_more_properties() {
+        let src = r#"
+        let mag = (p) => p.x + p.y + p.z
+        "#;
+        let ctx = infer_prog(src);
+
+        assert_eq!(get_type("mag", &ctx), "({x: number, y: number, z: number}) => number");
+    }
+
+    #[test]
+    fn infer_obj_type_based_on_nested_member_access() {
+        let src = r#"let slope = (line) => (line.p1.y - line.p0.y) / (line.p1.x - line.p0.x)"#;
+        let ctx = infer_prog(src);
+
+        assert_eq!(
+            get_type("slope", &ctx),
+            "({p1: {x: number, y: number}, p0: {x: number, y: number}}) => number"
+        );
     }
 
     #[test]
